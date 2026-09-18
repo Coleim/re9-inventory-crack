@@ -89,6 +89,9 @@ enum Command {
         dec: PathBuf,
         #[arg(long)]
         container: Option<String>,
+        /// Filter by owner (e.g. "User00", "User01").
+        #[arg(long)]
+        owner: Option<String>,
     },
     /// Set an inventory slot's quantity in place, by container name + item
     /// index (see `inventory` to list them).
@@ -320,7 +323,7 @@ fn run() -> Result<(), String> {
         Command::Hash { name } => {
             println!("{:08x}  {name}", murmur3::name_hash(&name));
         }
-        Command::Inventory { dec, container } => {
+        Command::Inventory { dec, container, owner } => {
             let data = std::fs::read(&dec).map_err(|e| e.to_string())?;
             let roots = rsz::parse(&data);
             let slots = inventory::list_inventory(&roots);
@@ -331,9 +334,15 @@ fn run() -> Result<(), String> {
                         continue;
                     }
                 }
+                if let Some(o) = &owner {
+                    if &s.owner != o {
+                        continue;
+                    }
+                }
+                let item = s.item_id.as_deref().unwrap_or("???");
                 println!(
-                    "{}#{} [{}]  qty={}  item_id_hash={:#010x}  @{:#x}",
-                    s.container, s.container_index, s.item_index, s.quantity, s.item_id_hash, s.quantity_offset
+                    "{}/{}#{} [{}]  qty={}  item={item} (item_id_hash={:#010x})  @{:#x}",
+                    s.owner, s.container, s.container_index, s.item_index, s.quantity, s.item_id_hash, s.quantity_offset
                 );
                 count += 1;
             }

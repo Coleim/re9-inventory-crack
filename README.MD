@@ -59,22 +59,25 @@ re9 roundtrip <file.bin> [--steamid <id>]
 ### List inventory slots (with quantities)
 
 ```sh
-re9 inventory <decrypted.bin> [--container <name>]
+re9 inventory <decrypted.bin> [--container <name>] [--owner <name>]
 ```
 
 ```sh
 re9 inventory data011Slot_new.bin
-# Hand#1 [0]  qty=2  item_id_hash=0x377adaab  @0x86e34
-# Hand#1 [1]  qty=1  item_id_hash=0x084fcc97  @0x86ef8
-# ItemBox#2 [0]  qty=1  item_id_hash=0x8aa10656  @0x8788c
+# User00/Hand#1 [0]  qty=2  item=it20_00_003 (item_id_hash=0x377adaab)  @0x86874
+# User00/Hand#1 [1]  qty=1  item=it00_01_000 (item_id_hash=0x084fcc97)  @0x86938
+# User00/ItemBox#2 [0]  qty=1  item=it99_07_000 (item_id_hash=0x8aa10656)  @0x872cc
 # ...
 ```
 
-Each slot is identified by its container name (`Hand`, `ItemBox`,
-`ShareItemBox`, ...), the index of that container (since several containers
-can share the same name), and the item's index within it. `item_id_hash` is
-a hash of the item's type (not yet resolvable to a human-readable name, but
-stable/comparable across slots and saves).
+Each slot is identified by its owner (`User00`, `User01`, ... - co-op saves
+have one set of containers per character), container name (`Hand`,
+`ItemBox`, `ShareItemBox`, ...), the index of that container (since a given
+owner can have several containers with the same name), and the item's index
+within it. `item` is the item's internal id (e.g. `it40_00_000`), resolved
+from `item_id_hash` via the embedded `app.ItemID.Hash` enum table; there is
+no further mapping to the item's localized display name (e.g. "9mm Ammo")
+yet.
 
 ### Edit an inventory slot's quantity
 
