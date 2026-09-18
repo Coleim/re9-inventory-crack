@@ -1,0 +1,49 @@
+~ R0#8a7ccee5._Data#695a3627._LastUpdatedTimeTicks#0327223f
+    A: 639167264519303076  @0x38
+    B: 639167264764167051
+~ R0#8a7ccee5._Data#695a3627._SaveCount#45157494
+    A: 4  @0x6c
+    B: 5
+~ R0#8a7ccee5._Data#695a3627._SerialNumber#39a2d78e
+    A: 71  @0x28
+    B: 73
+~ R13#d305600b._Data#695a3627._Backups#24f98c12[0]._TimeCount#7b1eca6c
+    A: 5596464336  @0x44ef0
+    B: 5620950957
+~ R13#d305600b._Data#695a3627._Backups#24f98c12[1]._TimeCount#7b1eca6c
+    A: 2104239473  @0x44f48
+    B: 2111745887
+~ R13#d305600b._Data#695a3627._Backups#24f98c12[7]._TimeCount#7b1eca6c
+    A: 15675703  @0x450f8
+    B: 23182117
+~ R18#fd4a348e._Data#695a3627._InventoryData#47f0e635[1]._PanelItems#dcc225ac[4]._LoadingItems#9347ec5d[0]._AmountSaveData#902e5ff8._Stock#955d3f51
+    A: 1  @0x80f30
+    B: 0
+~ R2#65070b28._Data#695a3627._ReInfoData#42c7c05e._BattleData#65fff8d9.len
+    A: 11  @0x0
+    B: 12
++ R2#65070b28._Data#695a3627._ReInfoData#42c7c05e._BattleData#65fff8d9[11]._AttackCount#df0c5e79 = 0 (only B)
++ R2#65070b28._Data#695a3627._ReInfoData#42c7c05e._BattleData#65fff8d9[11]._DefeatCount#485c1e7b = 0 (only B)
++ R2#65070b28._Data#695a3627._ReInfoData#42c7c05e._BattleData#65fff8d9[11]._Key#a8aceca4._EnemyIDHash#b4ed3394 = 1857826560 (only B)
++ R2#65070b28._Data#695a3627._ReInfoData#42c7c05e._BattleData#65fff8d9[11]._Key#a8aceca4._PlayerIDHash#27beeb18 = 1993674400 (only B)
++ R2#65070b28._Data#695a3627._ReInfoData#42c7c05e._BattleData#65fff8d9[11]._Key#a8aceca4._WeaponIDHash#080ac573 = 3409301908 (only B)
+~ R29#bae3968c._Data#695a3627._ManualSaveCount#1d08d25e
+    A: 4  @0x93e98
+    B: 5
+~ R5#0ffee0ea._Data#695a3627._Backups#24f98c12.len
+    A: 1  @0x0
+    B: 3
++ R5#0ffee0ea._Data#695a3627._Backups#24f98c12[1]._ConversationGuid#84cec372 = struct:00000000000000000000000000000000 (only B)
++ R5#0ffee0ea._Data#695a3627._Backups#24f98c12[1]._ConversationIDHash#9b923743 = 3908198429 (only B)
++ R5#0ffee0ea._Data#695a3627._Backups#24f98c12[1]._ConversationTypeHash#7dda70fa = 3257504244 (only B)
++ R5#0ffee0ea._Data#695a3627._Backups#24f98c12[1]._CurrentParagraphNo#c97b97c8 = -1 (only B)
++ R5#0ffee0ea._Data#695a3627._Backups#24f98c12[1]._FinishedParagraphNo#153d304c = -1 (only B)
++ R5#0ffee0ea._Data#695a3627._Backups#24f98c12[1]._IsFinished#e2c49210 = false (only B)
++ R5#0ffee0ea._Data#695a3627._Backups#24f98c12[1]._IsStarted#d3ffe417 = false (only B)
++ R5#0ffee0ea._Data#695a3627._Backups#24f98c12[2]._ConversationGuid#84cec372 = struct:00000000000000000000000000000000 (only B)
++ R5#0ffee0ea._Data#695a3627._Backups#24f98c12[2]._ConversationIDHash#9b923743 = 3247197688 (only B)
++ R5#0ffee0ea._Data#695a3627._Backups#24f98c12[2]._ConversationTypeHash#7dda70fa = 3257504244 (only B)
++ R5#0ffee0ea._Data#695a3627._Backups#24f98c12[2]._CurrentParagraphNo#c97b97c8 = -1 (only B)
++ R5#0ffee0ea._Data#695a3627._Backups#24f98c12[2]._FinishedParagraphNo#153d304c = -1 (only B)
++ R5#0ffee0ea._Data#695a3627._Backups#24f98c12[2]._IsFinished#e2c49210 = false (only B)
++ R5#0ffee0ea._Data#695a3627._Backups#24f98c12[2]._IsStarted#d3ffe417 = false (only B)
