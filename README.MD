@@ -66,6 +66,8 @@ re9 inventory <decrypted.bin> [--container <name>] [--owner <name>]
 re9 inventory data011Slot_new.bin
 # User00/Hand#1 [0]  qty=2  item=it20_00_003 (item_id_hash=0x377adaab)  @0x86874
 # User00/Hand#1 [1]  qty=1  item=it00_01_000 (item_id_hash=0x084fcc97)  @0x86938
+# User00/Hand#1 [4]  qty=1  item=it10_02_000 (item_id_hash=0xf29dd2b8)  @0x86b90
+#     loaded[0]  item=it40_02_000 (item_id_hash=0xf9977e4a)  stock=4 @0x86be8  chamber=0 @0x86c1c
 # User00/ItemBox#2 [0]  qty=1  item=it99_07_000 (item_id_hash=0x8aa10656)  @0x872cc
 # ...
 ```
@@ -79,6 +81,11 @@ from `item_id_hash` via the embedded `app.ItemID.Hash` enum table; there is
 no further mapping to the item's localized display name (e.g. "9mm Ammo")
 yet.
 
+Weapons that have ammo loaded show one or more indented `loaded[j]` lines:
+`stock` is the ammo loaded in the magazine, `chamber` is the round loaded in
+the chamber (separate from the magazine); both are independently editable
+(see below).
+
 ### Edit an inventory slot's quantity
 
 ```sh
@@ -88,6 +95,18 @@ re9 set-quantity <decrypted.bin> <container> <container_index> <item_index> <qua
 ```sh
 re9 set-quantity data011Slot_new.bin Hand 1 6 99
 # Hand#1 [6]  qty: 12 -> 99  @0x873cc
+```
+
+### Edit a weapon's loaded ammo (magazine / chamber)
+
+```sh
+re9 set-loaded-quantity <decrypted.bin> <container> <container_index> <item_index> <loaded_index> <quantity>
+re9 set-chamber-quantity <decrypted.bin> <container> <container_index> <item_index> <loaded_index> <quantity>
+```
+
+```sh
+re9 set-loaded-quantity data011Slot_new.bin Hand 1 4 0 5
+# Hand#1 [4].loaded[0]  stock: 4 -> 5  @0x86be8
 ```
 
 This edits the decrypted payload in place; re-encrypt it afterwards with

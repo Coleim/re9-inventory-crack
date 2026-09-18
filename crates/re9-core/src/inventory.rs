@@ -11,12 +11,13 @@
 //!   _BoardTypeName#d772f792: String       // container name: "Hand", "ItemBox", "ShareItemBox"
 //!   _PanelItems#dcc225ac: Array<app.Inventory.PanelItemSaveData#b00026aa>
 //!     [i] _ItemIDHash#875dd7e9: U32       // item TYPE hash - murmur3(UTF-16LE(item_id), seed=0xffffffff)
-//!         _Stock#955d3f51: S32            // <- the actual quantity
+//!         _Stock#955d3f51: S32            // <- the actual (reserve/carried) quantity
 //!         _StoreOrder#069df450: S32       // UI grid sort order - NOT the quantity!
 //!         _LoadingItems#9347ec5d: Array<app.Inventory.ContainItemSaveData#6b8482e9>
 //!           [j] _AmountSaveData#902e5ff8 (app.ItemStockData.SaveData#491d1396)
 //!                 _Stock#955d3f51: S32    // ammo loaded in a weapon's magazine
-//!               _ChamberStock#4d4a0375: S32  // bullet in the chamber
+//!                 _ItemIDHash#875dd7e9    // ammo type loaded
+//!               _ChamberStock#4d4a0375: S32  // round(s) in the chamber
 //!         ... (attachments, position, display bits, etc.)
 //! ```
 //!
@@ -35,9 +36,11 @@
 //! (e.g. "Hand") but different `_UserName` - these belong to different
 //! characters/save-users, not duplicate/stale data.
 //!
-//! Only the top-level `_Stock` (reserve/carried quantity) is exposed here
-//! for now; the nested `_LoadingItems` (ammo loaded in a weapon) is a
-//! likely follow-up.
+//! `_LoadingItems[]._AmountSaveData._Stock` (ammo loaded in a weapon's
+//! magazine) is confirmed via `references/re9_editor/diff.txt`: it dropped
+//! from 1 to 0 for the equipped "Requiem" pistol (`it10_02_000`) after
+//! firing its last loaded round. `set_loaded_stock`/`set_chamber_stock`
+//! edit these in place, same as the top-level `_Stock`.
 
 use crate::rsz::{Class, Root, Value};
 
@@ -48,6 +51,9 @@ const ITEMS_FIELD: u32 = 0xdcc225ac; // _PanelItems
 const ITEM_CLASS: u32 = 0xb00026aa;
 const QUANTITY_FIELD: u32 = 0x955d3f51; // _Stock
 const ITEM_ID_HASH_FIELD: u32 = 0x875dd7e9; // _ItemIDHash
+const LOADING_ITEMS_FIELD: u32 = 0x9347ec5d; // _LoadingItems
+const AMOUNT_SAVE_DATA_FIELD: u32 = 0x902e5ff8; // _AmountSaveData
+const CHAMBER_STOCK_FIELD: u32 = 0x4d4a0375; // _ChamberStock
 
 const ITEM_ID_ENUM_TYPE: &str = "app.ItemID.Hash";
 
@@ -74,6 +80,27 @@ pub struct InventorySlot {
     /// Byte offset of the quantity field in the decrypted payload, for
     /// in-place editing via [`set_quantity`].
     pub quantity_offset: usize,
+    /// Ammo loaded into this item (e.g. a weapon's magazine + chamber), if
+    /// any (`_LoadingItems`).
+    pub loaded: Vec<LoadedAmmo>,
+}
+
+/// Ammo loaded in a weapon (magazine stock + chamber), nested under an
+/// [`InventorySlot`]'s `_LoadingItems[j]`.
+#[derive(Debug, Clone)]
+pub struct LoadedAmmo {
+    /// Index within the parent item's `_LoadingItems` array.
+    pub loaded_index: usize,
+    /// Hash of the loaded ammo's type/id (`_AmountSaveData._ItemIDHash`).
+    pub item_id_hash: u32,
+    pub item_id: Option<String>,
+    /// Ammo loaded in the magazine (`_AmountSaveData._Stock`).
+    pub stock: i32,
+    pub stock_offset: usize,
+    /// Round(s) in the chamber (`_ChamberStock`), separate from the
+    /// magazine stock.
+    pub chamber_stock: i32,
+    pub chamber_stock_offset: usize,
 }
 
 fn field<'a>(c: &'a Class, hash: u32) -> Option<&'a Value> {
@@ -94,10 +121,59 @@ fn as_scalar(v: &Value) -> Option<(usize, &str)> {
     }
 }
 
+fn as_class(v: &Value) -> Option<&Class> {
+    match v {
+        Value::Class(c) => Some(c),
+        _ => None,
+    }
+}
+
 /// Resolve an `_ItemIDHash` value to its plain item id string (e.g.
 /// `"it40_00_000"`), via the embedded `app.ItemID.Hash` enum table.
 pub fn resolve_item_id(item_id_hash: u32) -> Option<String> {
     crate::schema::enum_name(ITEM_ID_ENUM_TYPE, item_id_hash as i64).map(|s| s.to_string())
+}
+
+fn collect_loaded_ammo(item: &Class) -> Vec<LoadedAmmo> {
+    let mut out = Vec::new();
+    let Some(Value::Array { items, .. }) = field(item, LOADING_ITEMS_FIELD) else {
+        return out;
+    };
+    for (loaded_index, entry) in items.iter().enumerate() {
+        let Some(container_item) = as_class(entry) else {
+            continue;
+        };
+        let Some(amount) = field(container_item, AMOUNT_SAVE_DATA_FIELD).and_then(as_class) else {
+            continue;
+        };
+        let Some((stock_offset, stock_text)) =
+            field(amount, QUANTITY_FIELD).and_then(as_scalar)
+        else {
+            continue;
+        };
+        let Ok(stock) = stock_text.parse::<i32>() else {
+            continue;
+        };
+        let item_id_hash = field(amount, ITEM_ID_HASH_FIELD)
+            .and_then(as_scalar)
+            .and_then(|(_, t)| t.parse::<u32>().ok())
+            .unwrap_or(0);
+        let (chamber_stock, chamber_stock_offset) =
+            match field(container_item, CHAMBER_STOCK_FIELD).and_then(as_scalar) {
+                Some((off, text)) => (text.parse::<i32>().unwrap_or(0), off),
+                None => (0, 0),
+            };
+        out.push(LoadedAmmo {
+            loaded_index,
+            item_id_hash,
+            item_id: resolve_item_id(item_id_hash),
+            stock,
+            stock_offset,
+            chamber_stock,
+            chamber_stock_offset,
+        });
+    }
+    out
 }
 
 fn walk_class(c: &Class, out: &mut Vec<InventorySlot>, container_counter: &mut usize) {
@@ -132,6 +208,7 @@ fn walk_class(c: &Class, out: &mut Vec<InventorySlot>, container_counter: &mut u
                                         item_id: resolve_item_id(item_id_hash),
                                         quantity,
                                         quantity_offset: off,
+                                        loaded: collect_loaded_ammo(ic),
                                     });
                                 }
                             }
@@ -176,13 +253,28 @@ pub fn list_inventory(roots: &[Root]) -> Vec<InventorySlot> {
 /// Overwrite an inventory slot's quantity (`_Stock`) in place in the
 /// decrypted payload.
 pub fn set_quantity(payload: &mut [u8], slot: &InventorySlot, quantity: i32) -> Result<(), String> {
-    if slot.quantity_offset + 4 > payload.len() {
-        return Err(format!(
-            "offset {:#x} out of bounds",
-            slot.quantity_offset
-        ));
+    set_i32_at(payload, slot.quantity_offset, quantity)
+}
+
+/// Overwrite a weapon's loaded (magazine) ammo stock in place
+/// (`_LoadingItems[j]._AmountSaveData._Stock`).
+pub fn set_loaded_stock(payload: &mut [u8], loaded: &LoadedAmmo, stock: i32) -> Result<(), String> {
+    set_i32_at(payload, loaded.stock_offset, stock)
+}
+
+/// Overwrite a weapon's chamber ammo stock in place
+/// (`_LoadingItems[j]._ChamberStock`).
+pub fn set_chamber_stock(payload: &mut [u8], loaded: &LoadedAmmo, stock: i32) -> Result<(), String> {
+    if loaded.chamber_stock_offset == 0 {
+        return Err("this loaded-ammo entry has no _ChamberStock field".to_string());
     }
-    payload[slot.quantity_offset..slot.quantity_offset + 4]
-        .copy_from_slice(&quantity.to_le_bytes());
+    set_i32_at(payload, loaded.chamber_stock_offset, stock)
+}
+
+fn set_i32_at(payload: &mut [u8], offset: usize, value: i32) -> Result<(), String> {
+    if offset + 4 > payload.len() {
+        return Err(format!("offset {offset:#x} out of bounds"));
+    }
+    payload[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
     Ok(())
 }

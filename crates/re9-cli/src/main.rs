@@ -106,6 +106,26 @@ enum Command {
         item_index: usize,
         quantity: i32,
     },
+    /// Set a weapon's loaded magazine ammo in place
+    /// (`_LoadingItems[loaded_index]._AmountSaveData._Stock`).
+    SetLoadedQuantity {
+        dec: PathBuf,
+        container: String,
+        container_index: usize,
+        item_index: usize,
+        /// Index within the item's `_LoadingItems` array (see `inventory`).
+        loaded_index: usize,
+        quantity: i32,
+    },
+    /// Set a weapon's chamber ammo in place (`_LoadingItems[loaded_index]._ChamberStock`).
+    SetChamberQuantity {
+        dec: PathBuf,
+        container: String,
+        container_index: usize,
+        item_index: usize,
+        loaded_index: usize,
+        quantity: i32,
+    },
 }
 
 /// `foo/bar.bin` -> `foo/bar_new.bin`
@@ -344,6 +364,13 @@ fn run() -> Result<(), String> {
                     "{}/{}#{} [{}]  qty={}  item={item} (item_id_hash={:#010x})  @{:#x}",
                     s.owner, s.container, s.container_index, s.item_index, s.quantity, s.item_id_hash, s.quantity_offset
                 );
+                for l in &s.loaded {
+                    let loaded_item = l.item_id.as_deref().unwrap_or("???");
+                    println!(
+                        "    loaded[{}]  item={loaded_item} (item_id_hash={:#010x})  stock={} @{:#x}  chamber={} @{:#x}",
+                        l.loaded_index, l.item_id_hash, l.stock, l.stock_offset, l.chamber_stock, l.chamber_stock_offset
+                    );
+                }
                 count += 1;
             }
             eprintln!("{count} inventory slots");
@@ -374,6 +401,82 @@ fn run() -> Result<(), String> {
             println!(
                 "{}#{} [{}]  qty: {old} -> {quantity}  @{:#x}",
                 slot.container, slot.container_index, slot.item_index, slot.quantity_offset
+            );
+        }
+        Command::SetLoadedQuantity {
+            dec,
+            container,
+            container_index,
+            item_index,
+            loaded_index,
+            quantity,
+        } => {
+            let mut data = std::fs::read(&dec).map_err(|e| e.to_string())?;
+            let roots = rsz::parse(&data);
+            let slots = inventory::list_inventory(&roots);
+            let slot = slots
+                .iter()
+                .find(|s| {
+                    s.container == container
+                        && s.container_index == container_index
+                        && s.item_index == item_index
+                })
+                .ok_or_else(|| {
+                    format!("no such slot: {container}#{container_index} [{item_index}]")
+                })?;
+            let loaded = slot
+                .loaded
+                .iter()
+                .find(|l| l.loaded_index == loaded_index)
+                .ok_or_else(|| {
+                    format!(
+                        "no such loaded-ammo entry: {container}#{container_index} [{item_index}].loaded[{loaded_index}]"
+                    )
+                })?;
+            let old = loaded.stock;
+            inventory::set_loaded_stock(&mut data, loaded, quantity)?;
+            std::fs::write(&dec, &data).map_err(|e| e.to_string())?;
+            println!(
+                "{container}#{container_index} [{item_index}].loaded[{loaded_index}]  stock: {old} -> {quantity}  @{:#x}",
+                loaded.stock_offset
+            );
+        }
+        Command::SetChamberQuantity {
+            dec,
+            container,
+            container_index,
+            item_index,
+            loaded_index,
+            quantity,
+        } => {
+            let mut data = std::fs::read(&dec).map_err(|e| e.to_string())?;
+            let roots = rsz::parse(&data);
+            let slots = inventory::list_inventory(&roots);
+            let slot = slots
+                .iter()
+                .find(|s| {
+                    s.container == container
+                        && s.container_index == container_index
+                        && s.item_index == item_index
+                })
+                .ok_or_else(|| {
+                    format!("no such slot: {container}#{container_index} [{item_index}]")
+                })?;
+            let loaded = slot
+                .loaded
+                .iter()
+                .find(|l| l.loaded_index == loaded_index)
+                .ok_or_else(|| {
+                    format!(
+                        "no such loaded-ammo entry: {container}#{container_index} [{item_index}].loaded[{loaded_index}]"
+                    )
+                })?;
+            let old = loaded.chamber_stock;
+            inventory::set_chamber_stock(&mut data, loaded, quantity)?;
+            std::fs::write(&dec, &data).map_err(|e| e.to_string())?;
+            println!(
+                "{container}#{container_index} [{item_index}].loaded[{loaded_index}]  chamber: {old} -> {quantity}  @{:#x}",
+                loaded.chamber_stock_offset
             );
         }
     }
