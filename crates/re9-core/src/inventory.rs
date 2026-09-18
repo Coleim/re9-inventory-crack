@@ -1,24 +1,32 @@
 //! Inventory slot discovery + editing.
 //!
-//! Reverse-engineered empirically by diffing two save files from the same
-//! playthrough before/after "shoot then reload" (see PLAN.MD's short-term
-//! plan). The relevant shape, under the RSZ tree:
+//! Field mapping confirmed against `references/re9_editor/re9_names.tsv`
+//! (a community RE9 RSZ type dump, hashed with murmur3 the same way the
+//! game hashes field names) and `references/re9_editor/dump11.txt`/
+//! `diff.txt`. The relevant shape, under the RSZ tree:
 //!
 //! ```text
-//! <container class 0x6dc40103>          // one per inventory container
-//!   d772f792: String                    // container name: "Hand", "ItemBox", "ShareItemBox"
-//!   dcc225ac: Array<Class 0xb00026aa>   // the item slots
-//!     [i] .069df450: S32                // <- quantity (confirmed via diff)
-//!         .875dd7e9: U32                // per-instance serial number (not item type)
-//!         .955d3f51: S32
-//!         ... (attachments, unused string slots, etc.)
+//! app.Inventory.SaveData#6dc40103         // one per inventory container
+//!   _BoardTypeName#d772f792: String       // container name: "Hand", "ItemBox", "ShareItemBox"
+//!   _PanelItems#dcc225ac: Array<app.Inventory.PanelItemSaveData#b00026aa>
+//!     [i] _ItemIDHash#875dd7e9: U32       // item TYPE hash (not a per-instance id)
+//!         _Stock#955d3f51: S32            // <- the actual quantity
+//!         _StoreOrder#069df450: S32       // UI grid sort order - NOT the quantity!
+//!         _LoadingItems#9347ec5d: Array<app.Inventory.ContainItemSaveData#6b8482e9>
+//!           [j] _AmountSaveData#902e5ff8 (app.ItemStockData.SaveData#491d1396)
+//!                 _Stock#955d3f51: S32    // ammo loaded in a weapon's magazine
+//!               _ChamberStock#4d4a0375: S32  // bullet in the chamber
+//!         ... (attachments, position, display bits, etc.)
 //! ```
 //!
-//! We don't yet know how to resolve an item slot's *type* (e.g. "9mm
-//! Ammo") from this data alone - there is no item-id string directly on
-//! the item struct. For now slots are identified by container name + index
-//! + serial number; a future pass can try to correlate serials/positions
-//! with the item catalog once more is known.
+//! We don't yet know how to resolve `_ItemIDHash` back to a human item name
+//! (e.g. "9mm Ammo") - it doesn't match a simple murmur3 of the plain item
+//! id strings seen elsewhere (e.g. `"it10_02_000"`). For now slots are
+//! identified by container name + index + item index + item-type hash.
+//!
+//! Only the top-level `_Stock` (reserve/carried quantity) is exposed here
+//! for now; the nested `_LoadingItems` (ammo loaded in a weapon) is a
+//! likely follow-up.
 
 use crate::rsz::{Class, Root, Value};
 
@@ -26,8 +34,8 @@ const CONTAINER_CLASS: u32 = 0x6dc40103;
 const CONTAINER_NAME_FIELD: u32 = 0xd772f792;
 const ITEMS_FIELD: u32 = 0xdcc225ac;
 const ITEM_CLASS: u32 = 0xb00026aa;
-const QUANTITY_FIELD: u32 = 0x069df450;
-const SERIAL_FIELD: u32 = 0x875dd7e9;
+const QUANTITY_FIELD: u32 = 0x955d3f51; // _Stock
+const ITEM_ID_HASH_FIELD: u32 = 0x875dd7e9; // _ItemIDHash
 
 #[derive(Debug, Clone)]
 pub struct InventorySlot {
@@ -38,9 +46,10 @@ pub struct InventorySlot {
     pub container_index: usize,
     /// Index of this item within its container's item array.
     pub item_index: usize,
-    /// Per-instance serial number (not the item type).
-    pub serial: u32,
-    /// Current stack quantity.
+    /// Hash of the item's type/id (`_ItemIDHash`). Not yet resolvable to a
+    /// human name; can be used to group/compare slots of the same item type.
+    pub item_id_hash: u32,
+    /// Current stack quantity (`_Stock`).
     pub quantity: i32,
     /// Byte offset of the quantity field in the decrypted payload, for
     /// in-place editing via [`set_quantity`].
@@ -76,7 +85,7 @@ fn walk_class(c: &Class, out: &mut Vec<InventorySlot>, container_counter: &mut u
                 for (item_index, item) in items.iter().enumerate() {
                     if let Value::Class(ic) = item {
                         if ic.hash == ITEM_CLASS {
-                            let serial = field(ic, SERIAL_FIELD)
+                            let item_id_hash = field(ic, ITEM_ID_HASH_FIELD)
                                 .and_then(as_scalar)
                                 .and_then(|(_, t)| t.parse::<u32>().ok())
                                 .unwrap_or(0);
@@ -88,7 +97,7 @@ fn walk_class(c: &Class, out: &mut Vec<InventorySlot>, container_counter: &mut u
                                         container: name.to_string(),
                                         container_index,
                                         item_index,
-                                        serial,
+                                        item_id_hash,
                                         quantity,
                                         quantity_offset: off,
                                     });
@@ -132,7 +141,8 @@ pub fn list_inventory(roots: &[Root]) -> Vec<InventorySlot> {
     out
 }
 
-/// Overwrite an inventory slot's quantity in place in the decrypted payload.
+/// Overwrite an inventory slot's quantity (`_Stock`) in place in the
+/// decrypted payload.
 pub fn set_quantity(payload: &mut [u8], slot: &InventorySlot, quantity: i32) -> Result<(), String> {
     if slot.quantity_offset + 4 > payload.len() {
         return Err(format!(

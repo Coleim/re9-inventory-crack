@@ -207,8 +207,9 @@ fn run() -> Result<(), String> {
                 None => println!("{body}"),
             }
             eprintln!(
-                "{full}/{} roots fully parsed, {partial} partial (truncated at a still-unmodeled struct), {} schema classes, {} resyncs",
+                "{full}/{} roots fully parsed, {partial} partial (truncated at a still-unmodeled struct), {} names, {} schema classes, {} resyncs",
                 roots.len(),
+                re9_core::names::count(),
                 re9_core::schema::count(),
                 re9_core::schema::resyncs()
             );
@@ -331,8 +332,8 @@ fn run() -> Result<(), String> {
                     }
                 }
                 println!(
-                    "{}#{} [{}]  qty={}  serial={:#010x}  @{:#x}",
-                    s.container, s.container_index, s.item_index, s.quantity, s.serial, s.quantity_offset
+                    "{}#{} [{}]  qty={}  item_id_hash={:#010x}  @{:#x}",
+                    s.container, s.container_index, s.item_index, s.quantity, s.item_id_hash, s.quantity_offset
                 );
                 count += 1;
             }

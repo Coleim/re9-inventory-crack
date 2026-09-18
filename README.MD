@@ -2,6 +2,10 @@
 
 Decrypt, inspect, and re-encrypt Resident Evil Requiem ("RE9") DSSS save files.
 
+Save files are located: 
+C:\Users\Clement\AppData\Roaming\GSE Saves\3764200\remote\win64_save
+
+
 See `PLAN.MD` for the overall project goals/roadmap.
 
 ## Building
@@ -60,15 +64,17 @@ re9 inventory <decrypted.bin> [--container <name>]
 
 ```sh
 re9 inventory data011Slot_new.bin
-# Hand#1 [0]  qty=1  serial=0x377adaab  @0x86e88
-# Hand#1 [1]  qty=3  serial=0x084fcc97  @0x86f4c
-# ItemBox#2 [0]  qty=1  serial=0x8aa10656  @0x878e0
+# Hand#1 [0]  qty=2  item_id_hash=0x377adaab  @0x86e34
+# Hand#1 [1]  qty=1  item_id_hash=0x084fcc97  @0x86ef8
+# ItemBox#2 [0]  qty=1  item_id_hash=0x8aa10656  @0x8788c
 # ...
 ```
 
 Each slot is identified by its container name (`Hand`, `ItemBox`,
 `ShareItemBox`, ...), the index of that container (since several containers
-can share the same name), and the item's index within it.
+can share the same name), and the item's index within it. `item_id_hash` is
+a hash of the item's type (not yet resolvable to a human-readable name, but
+stable/comparable across slots and saves).
 
 ### Edit an inventory slot's quantity
 

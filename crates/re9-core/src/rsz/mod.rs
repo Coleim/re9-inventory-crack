@@ -74,12 +74,11 @@ pub fn type_name(t: i32) -> &'static str {
     }
 }
 
-/// Fallback display name for a hash (no name database bundled - we don't
-/// have a `re9_names.tsv`). Field/class names can still be identified by
-/// hashing candidate strings with [`crate::murmur3::name_hash`] and
-/// comparing against these hex hashes.
+/// Human-readable display name for a field/class hash, backed by the
+/// embedded `re9_names.tsv` (see [`crate::names`]); falls back to the bare
+/// hex hash if the name isn't in the table.
 pub fn name_for(hash: u32) -> String {
-    format!("{hash:08x}")
+    crate::names::name_for(hash)
 }
 
 pub enum Value {
