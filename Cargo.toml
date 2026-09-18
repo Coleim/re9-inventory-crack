@@ -1,11 +1,3 @@
-[package]
-name = "re"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-aes = "0.9.1"
-hex-literal = "1.1.0"
-num-bigint = "0.4.6"
-ofb = "0.7.1"
-rayon = "1.12.0"
+[workspace]
+resolver = "2"
+members = ["crates/re9-core", "crates/re9-cli"]

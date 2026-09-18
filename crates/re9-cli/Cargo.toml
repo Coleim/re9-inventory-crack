@@ -1,0 +1,12 @@
+[package]
+name = "re9-cli"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "re9"
+path = "src/main.rs"
+
+[dependencies]
+re9-core = { path = "../re9-core" }
+clap = { version = "4", features = ["derive"] }
