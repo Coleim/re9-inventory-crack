@@ -26,6 +26,7 @@ pub fn plan_block(decrypted_data_length: u64) -> (u64, Vec<u64>) {
     (state, block_sizes)
 }
 
+#[cfg(test)]
 fn compare_block_plan(decrypted_len: u64) -> (Vec<u8>, usize, u64) {
     println!("decrypted_len: {decrypted_len}");
     let num_potential = ((decrypted_len & 0x3fff != 0) as u64) + (decrypted_len >> 0xe);
