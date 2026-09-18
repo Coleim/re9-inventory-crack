@@ -28,9 +28,9 @@
 //! is already present as enum values in the embedded `re9_enums.tsv` under
 //! `app.ItemID.Hash` (and `app.ShopCustomizeItemID.Hash`), so we can resolve
 //! it back to the plain item id string (e.g. `"it40_00_000"`) via
-//! [`crate::schema::enum_name`]. We don't have a further item id -> display
-//! name (localized text) table, so slots are shown by their internal id
-//! string rather than a human name like "9mm Ammo".
+//! [`crate::schema::enum_name`]. A small, manually curated table
+//! ([`crate::item_names`]) further maps a handful of known item ids to
+//! human display names (e.g. `"Munition de pistolet"`).
 //!
 //! Note there can be several containers with the same `_BoardTypeName`
 //! (e.g. "Hand") but different `_UserName` - these belong to different
@@ -75,6 +75,10 @@ pub struct InventorySlot {
     /// embedded `app.ItemID.Hash` enum table. This is the game's internal
     /// item id, not a localized display name.
     pub item_id: Option<String>,
+    /// Human-readable display name (e.g. "Munition de pistolet"), if known
+    /// - see [`crate::item_names`]. Only a handful of items are mapped so
+    /// far, identified manually from real saves.
+    pub item_name: Option<&'static str>,
     /// Current stack quantity (`_Stock`).
     pub quantity: i32,
     /// Byte offset of the quantity field in the decrypted payload, for
@@ -94,6 +98,8 @@ pub struct LoadedAmmo {
     /// Hash of the loaded ammo's type/id (`_AmountSaveData._ItemIDHash`).
     pub item_id_hash: u32,
     pub item_id: Option<String>,
+    /// Human-readable display name, if known - see [`crate::item_names`].
+    pub item_name: Option<&'static str>,
     /// Ammo loaded in the magazine (`_AmountSaveData._Stock`).
     pub stock: i32,
     pub stock_offset: usize,
@@ -134,6 +140,11 @@ pub fn resolve_item_id(item_id_hash: u32) -> Option<String> {
     crate::schema::enum_name(ITEM_ID_ENUM_TYPE, item_id_hash as i64).map(|s| s.to_string())
 }
 
+/// Resolve a human-readable display name for an item id, if known.
+fn resolve_item_name(item_id: Option<&str>) -> Option<&'static str> {
+    item_id.and_then(crate::item_names::item_name)
+}
+
 fn collect_loaded_ammo(item: &Class) -> Vec<LoadedAmmo> {
     let mut out = Vec::new();
     let Some(Value::Array { items, .. }) = field(item, LOADING_ITEMS_FIELD) else {
@@ -158,6 +169,7 @@ fn collect_loaded_ammo(item: &Class) -> Vec<LoadedAmmo> {
             .and_then(as_scalar)
             .and_then(|(_, t)| t.parse::<u32>().ok())
             .unwrap_or(0);
+        let item_id = resolve_item_id(item_id_hash);
         let (chamber_stock, chamber_stock_offset) =
             match field(container_item, CHAMBER_STOCK_FIELD).and_then(as_scalar) {
                 Some((off, text)) => (text.parse::<i32>().unwrap_or(0), off),
@@ -166,7 +178,8 @@ fn collect_loaded_ammo(item: &Class) -> Vec<LoadedAmmo> {
         out.push(LoadedAmmo {
             loaded_index,
             item_id_hash,
-            item_id: resolve_item_id(item_id_hash),
+            item_name: resolve_item_name(item_id.as_deref()),
+            item_id,
             stock,
             stock_offset,
             chamber_stock,
@@ -199,13 +212,15 @@ fn walk_class(c: &Class, out: &mut Vec<InventorySlot>, container_counter: &mut u
                                 field(ic, QUANTITY_FIELD).and_then(as_scalar)
                             {
                                 if let Ok(quantity) = text.parse::<i32>() {
+                                    let item_id = resolve_item_id(item_id_hash);
                                     out.push(InventorySlot {
                                         owner: owner.clone(),
                                         container: name.to_string(),
                                         container_index,
                                         item_index,
                                         item_id_hash,
-                                        item_id: resolve_item_id(item_id_hash),
+                                        item_name: resolve_item_name(item_id.as_deref()),
+                                        item_id,
                                         quantity,
                                         quantity_offset: off,
                                         loaded: collect_loaded_ammo(ic),

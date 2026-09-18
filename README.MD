@@ -64,10 +64,10 @@ re9 inventory <decrypted.bin> [--container <name>] [--owner <name>]
 
 ```sh
 re9 inventory data011Slot_new.bin
-# User00/Hand#1 [0]  qty=2  item=it20_00_003 (item_id_hash=0x377adaab)  @0x86874
+# User00/Hand#1 [0]  qty=2  item=it20_00_003 "Bouteille vide" (item_id_hash=0x377adaab)  @0x86874
 # User00/Hand#1 [1]  qty=1  item=it00_01_000 (item_id_hash=0x084fcc97)  @0x86938
-# User00/Hand#1 [4]  qty=1  item=it10_02_000 (item_id_hash=0xf29dd2b8)  @0x86b90
-#     loaded[0]  item=it40_02_000 (item_id_hash=0xf9977e4a)  stock=4 @0x86be8  chamber=0 @0x86c1c
+# User00/Hand#1 [4]  qty=1  item=it10_02_000 "Requiem" (item_id_hash=0xf29dd2b8)  @0x86b90
+#     loaded[0]  item=it40_02_000 "Munition de Requiem" (item_id_hash=0xf9977e4a)  stock=4 @0x86be8  chamber=0 @0x86c1c
 # User00/ItemBox#2 [0]  qty=1  item=it99_07_000 (item_id_hash=0x8aa10656)  @0x872cc
 # ...
 ```
@@ -77,9 +77,10 @@ have one set of containers per character), container name (`Hand`,
 `ItemBox`, `ShareItemBox`, ...), the index of that container (since a given
 owner can have several containers with the same name), and the item's index
 within it. `item` is the item's internal id (e.g. `it40_00_000`), resolved
-from `item_id_hash` via the embedded `app.ItemID.Hash` enum table; there is
-no further mapping to the item's localized display name (e.g. "9mm Ammo")
-yet.
+from `item_id_hash` via the embedded `app.ItemID.Hash` enum table. A
+human-readable name (e.g. `"Munition de pistolet"`) is shown in quotes when
+known - see `crates/re9-core/src/item_names.rs` for the (currently small,
+manually identified) list; unmapped items only show their internal id.
 
 Weapons that have ammo loaded show one or more indented `loaded[j]` lines:
 `stock` is the ammo loaded in the magazine, `chamber` is the round loaded in

@@ -360,14 +360,16 @@ fn run() -> Result<(), String> {
                     }
                 }
                 let item = s.item_id.as_deref().unwrap_or("???");
+                let name = s.item_name.map(|n| format!(" \"{n}\"")).unwrap_or_default();
                 println!(
-                    "{}/{}#{} [{}]  qty={}  item={item} (item_id_hash={:#010x})  @{:#x}",
+                    "{}/{}#{} [{}]  qty={}  item={item}{name} (item_id_hash={:#010x})  @{:#x}",
                     s.owner, s.container, s.container_index, s.item_index, s.quantity, s.item_id_hash, s.quantity_offset
                 );
                 for l in &s.loaded {
                     let loaded_item = l.item_id.as_deref().unwrap_or("???");
+                    let loaded_name = l.item_name.map(|n| format!(" \"{n}\"")).unwrap_or_default();
                     println!(
-                        "    loaded[{}]  item={loaded_item} (item_id_hash={:#010x})  stock={} @{:#x}  chamber={} @{:#x}",
+                        "    loaded[{}]  item={loaded_item}{loaded_name} (item_id_hash={:#010x})  stock={} @{:#x}  chamber={} @{:#x}",
                         l.loaded_index, l.item_id_hash, l.stock, l.stock_offset, l.chamber_stock, l.chamber_stock_offset
                     );
                 }
