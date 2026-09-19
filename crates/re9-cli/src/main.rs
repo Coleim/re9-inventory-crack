@@ -126,6 +126,19 @@ enum Command {
         loaded_index: usize,
         quantity: i32,
     },
+    /// Add a new reserve item slot to a container's inventory (`_PanelItems`),
+    /// by cloning an existing item in that container as a template and
+    /// patching its item id + quantity. Use `inventory` to find a suitable
+    /// `template_item_index` (pick a simple item with no loaded ammo/attachments).
+    AddItem {
+        dec: PathBuf,
+        container: String,
+        container_index: usize,
+        template_item_index: usize,
+        /// Item id string, e.g. "it40_02_000" (Munition de Requiem).
+        item_id: String,
+        quantity: i32,
+    },
 }
 
 /// `foo/bar.bin` -> `foo/bar_new.bin`
@@ -479,6 +492,31 @@ fn run() -> Result<(), String> {
             println!(
                 "{container}#{container_index} [{item_index}].loaded[{loaded_index}]  chamber: {old} -> {quantity}  @{:#x}",
                 loaded.chamber_stock_offset
+            );
+        }
+        Command::AddItem {
+            dec,
+            container,
+            container_index,
+            template_item_index,
+            item_id,
+            quantity,
+        } => {
+            let mut data = std::fs::read(&dec).map_err(|e| e.to_string())?;
+            let roots = rsz::parse(&data);
+            let hash = inventory::item_id_hash(&item_id);
+            inventory::add_reserve_item(
+                &mut data,
+                &roots,
+                &container,
+                container_index,
+                template_item_index,
+                hash,
+                quantity,
+            )?;
+            std::fs::write(&dec, &data).map_err(|e| e.to_string())?;
+            println!(
+                "{container}#{container_index}: added {item_id} (item_id_hash={hash:#010x}) qty={quantity}, cloned from template item [{template_item_index}]"
             );
         }
     }

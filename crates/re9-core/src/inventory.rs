@@ -56,6 +56,7 @@ const AMOUNT_SAVE_DATA_FIELD: u32 = 0x902e5ff8; // _AmountSaveData
 const CHAMBER_STOCK_FIELD: u32 = 0x4d4a0375; // _ChamberStock
 
 const ITEM_ID_ENUM_TYPE: &str = "app.ItemID.Hash";
+const STORE_ORDER_FIELD: u32 = 0x069df450; // _StoreOrder (grid sort order, not quantity)
 
 #[derive(Debug, Clone)]
 pub struct InventorySlot {
@@ -292,4 +293,152 @@ fn set_i32_at(payload: &mut [u8], offset: usize, value: i32) -> Result<(), Strin
     }
     payload[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
     Ok(())
+}
+
+/// Hash for an item id string, e.g. `"it40_02_000"` -> its `_ItemIDHash`.
+pub fn item_id_hash(item_id: &str) -> u32 {
+    crate::murmur3::utf16le_hash(item_id)
+}
+
+fn find_container<'a>(
+    class: &'a Class,
+    container: &str,
+    target_index: usize,
+    counter: &mut usize,
+) -> Option<&'a Class> {
+    if class.hash == CONTAINER_CLASS {
+        if let (Some(name_val), Some(Value::Array { .. })) =
+            (field(class, CONTAINER_NAME_FIELD), field(class, ITEMS_FIELD))
+        {
+            if let Some(name) = as_string(name_val) {
+                let idx = *counter;
+                *counter += 1;
+                if idx == target_index && name == container {
+                    return Some(class);
+                }
+            }
+        }
+    }
+    for f in &class.fields {
+        if let Some(found) = find_container_in_value(&f.value, container, target_index, counter) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn find_container_in_value<'a>(
+    v: &'a Value,
+    container: &str,
+    target_index: usize,
+    counter: &mut usize,
+) -> Option<&'a Class> {
+    match v {
+        Value::Class(c) => find_container(c, container, target_index, counter),
+        Value::Array { items, .. } => {
+            for it in items {
+                if let Some(found) = find_container_in_value(it, container, target_index, counter) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Add a new reserve item slot to a container's `_PanelItems` array, by
+/// deep-cloning an existing item's *parsed* `Class` in that same container
+/// (the "template" - pick any existing item; a simple one like a plain
+/// ammo box is easiest to reason about, but any item works since the whole
+/// tree is patched and re-serialized, not just a byte range), patching its
+/// `_ItemIDHash`/`_Stock`/`_StoreOrder` field values, and serializing it
+/// with [`crate::rsz::write_class`] at the correct new position - so
+/// alignment-sensitive fields (e.g. `_Position`'s `Struct[8]`) are encoded
+/// correctly regardless of where the new item lands.
+///
+/// This is the only way to *add* an item that doesn't already have a slot
+/// in the container: all other editing functions in this module only
+/// overwrite existing values in place. Since this changes the payload's
+/// length, `roots` must have been parsed from `payload`'s *current*
+/// contents before calling this (re-parse before any further edits).
+pub fn add_reserve_item(
+    payload: &mut Vec<u8>,
+    roots: &[Root],
+    container: &str,
+    container_index: usize,
+    template_item_index: usize,
+    item_id_hash: u32,
+    quantity: i32,
+) -> Result<(), String> {
+    let mut counter = 0usize;
+    let mut target: Option<&Class> = None;
+    for root in roots {
+        if let Ok(class) = &root.class {
+            if let Some(found) = find_container(class, container, container_index, &mut counter) {
+                target = Some(found);
+                break;
+            }
+        }
+    }
+    let container_class =
+        target.ok_or_else(|| format!("no such container: {container}#{container_index}"))?;
+
+    let (items, len_offset, items_end) = match field(container_class, ITEMS_FIELD) {
+        Some(Value::Array {
+            items,
+            len_offset,
+            items_end,
+            ..
+        }) => (items, *len_offset, *items_end),
+        _ => return Err("container has no _PanelItems array".to_string()),
+    };
+
+    let template = items
+        .get(template_item_index)
+        .and_then(as_class)
+        .filter(|c| c.hash == ITEM_CLASS)
+        .ok_or_else(|| format!("no such template item index {template_item_index}"))?;
+
+    // Bump _StoreOrder past every sibling's, so the new slot doesn't
+    // visually collide with an existing one in the inventory grid.
+    let max_order = items
+        .iter()
+        .filter_map(as_class)
+        .filter_map(|c| field(c, STORE_ORDER_FIELD).and_then(as_scalar))
+        .filter_map(|(_, t)| t.parse::<i32>().ok())
+        .max()
+        .unwrap_or(0);
+
+    let mut new_item = template.clone();
+    set_field_scalar(&mut new_item, ITEM_ID_HASH_FIELD, &item_id_hash.to_string())?;
+    set_field_scalar(&mut new_item, QUANTITY_FIELD, &quantity.to_string())?;
+    let _ = set_field_scalar(&mut new_item, STORE_ORDER_FIELD, &(max_order + 1).to_string());
+
+    let new_bytes = crate::rsz::write_class(&new_item, items_end);
+
+    // Splice the new element in right after the last existing element, and
+    // bump the array's `len` field.
+    payload.splice(items_end..items_end, new_bytes);
+    let old_len = u32::from_le_bytes(payload[len_offset..len_offset + 4].try_into().unwrap());
+    payload[len_offset..len_offset + 4].copy_from_slice(&(old_len + 1).to_le_bytes());
+
+    Ok(())
+}
+
+/// Overwrite a top-level scalar field's *value* (in the parsed tree, not
+/// raw bytes) by field hash, in place.
+fn set_field_scalar(class: &mut Class, hash: u32, text: &str) -> Result<(), String> {
+    let f = class
+        .fields
+        .iter_mut()
+        .find(|f| f.hash == hash)
+        .ok_or_else(|| format!("field {hash:#010x} not found"))?;
+    match &mut f.value {
+        Value::Scalar { text: t, .. } => {
+            *t = text.to_string();
+            Ok(())
+        }
+        _ => Err(format!("field {hash:#010x} is not a scalar")),
+    }
 }

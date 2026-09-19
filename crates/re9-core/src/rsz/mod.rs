@@ -6,9 +6,21 @@
 //! `re9_structs.tsv`) to detect and resync from desyncs and to get type
 //! hints for opaque `Struct` blobs (e.g. `via.vec3`).
 //!
-//! Editing is done in place: since array/class sizes never change, we only
-//! ever overwrite fixed-width scalar bytes at their already-known offset in
-//! the decrypted buffer - no re-serialization needed.
+//! Editing existing scalar fields is done in place (`set_scalar`/
+//! `set_struct`): since that never changes any size, no re-serialization
+//! is needed.
+//!
+//! Adding a *new* array element (e.g. a new inventory item) is different:
+//! it changes the payload's length, and every field after the insertion
+//! point shifts to a new absolute offset. Fields wider than 4 bytes are
+//! aligned to their *absolute file offset* (`align(n)`), not to a position
+//! relative to their containing struct - so a naive byte-for-byte clone of
+//! an existing element is only valid if it happens to land back on the
+//! same alignment class, which isn't guaranteed. To insert new elements
+//! correctly, we instead re-serialize the (already-parsed) `Value` tree
+//! with [`Writer`], which mirrors [`Reader`]'s alignment logic exactly,
+//! but computed fresh for wherever the new bytes are actually being
+//! written.
 
 pub struct Reader<'a> {
     pub d: &'a [u8],
@@ -46,6 +58,52 @@ impl<'a> Reader<'a> {
     }
     pub fn u64(&mut self) -> Result<u64, String> {
         Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
+    }
+}
+
+/// Mirror of [`Reader`], for re-serializing a parsed `Value`/`Class` tree
+/// back to bytes at an arbitrary absolute starting offset. `pos` tracks the
+/// *absolute* file offset the next written byte will land at, so
+/// `align(n)` produces exactly the padding a [`Reader`] would have skipped
+/// when re-parsing these bytes at this position.
+pub struct Writer {
+    pub buf: Vec<u8>,
+    pub pos: usize,
+}
+
+impl Writer {
+    pub fn new(start_pos: usize) -> Self {
+        Self { buf: Vec::new(), pos: start_pos }
+    }
+    pub fn align(&mut self, n: usize) {
+        if n > 1 {
+            let target = self.pos.div_ceil(n) * n;
+            let pad = target - self.pos;
+            self.buf.resize(self.buf.len() + pad, 0);
+            self.pos = target;
+        }
+    }
+    fn put(&mut self, bytes: &[u8]) {
+        self.buf.extend_from_slice(bytes);
+        self.pos += bytes.len();
+    }
+    pub fn u8(&mut self, v: u8) {
+        self.put(&[v]);
+    }
+    pub fn u16(&mut self, v: u16) {
+        self.put(&v.to_le_bytes());
+    }
+    pub fn u32(&mut self, v: u32) {
+        self.put(&v.to_le_bytes());
+    }
+    pub fn i32(&mut self, v: i32) {
+        self.put(&v.to_le_bytes());
+    }
+    pub fn u64(&mut self, v: u64) {
+        self.put(&v.to_le_bytes());
+    }
+    pub fn bytes(&mut self, b: &[u8]) {
+        self.put(b);
     }
 }
 
@@ -98,21 +156,83 @@ pub enum Value {
     },
     Array {
         member_type: i32,
+        member_size: u32,
+        /// `-1`/`0`/`1`: see [`read_array`]. Needed to re-emit the array
+        /// header faithfully when serializing.
+        array_type: i32,
+        /// If the array had an `0xffeeffee`-marked index-list prefix, the
+        /// raw index values (otherwise discarded by the reader, but needed
+        /// to write the array back unchanged).
+        marker_indices: Option<Vec<u32>>,
         items: Vec<Value>,
+        /// Byte offset of the array's `len` field (a plain `u32`), for
+        /// incrementing it in place when splicing in a new element.
+        len_offset: usize,
+        /// Byte offset where the array's element bytes begin (right after
+        /// the header/optional index-marker prefix).
+        items_start: usize,
+        /// Byte offset right after the last element's bytes (before the
+        /// array's trailing alignment padding) - i.e. where a new element
+        /// should be spliced in to become the new last element.
+        items_end: usize,
     },
     Class(Class),
 }
 
+impl Clone for Value {
+    fn clone(&self) -> Self {
+        match self {
+            Value::Scalar { off, ftype, width, text } => Value::Scalar {
+                off: *off,
+                ftype: *ftype,
+                width: *width,
+                text: text.clone(),
+            },
+            Value::Str { off, s } => Value::Str { off: *off, s: s.clone() },
+            Value::StructBytes { off, bytes } => {
+                Value::StructBytes { off: *off, bytes: bytes.clone() }
+            }
+            Value::Array {
+                member_type,
+                member_size,
+                array_type,
+                marker_indices,
+                items,
+                len_offset,
+                items_start,
+                items_end,
+            } => Value::Array {
+                member_type: *member_type,
+                member_size: *member_size,
+                array_type: *array_type,
+                marker_indices: marker_indices.clone(),
+                items: items.clone(),
+                len_offset: *len_offset,
+                items_start: *items_start,
+                items_end: *items_end,
+            },
+            Value::Class(c) => Value::Class(c.clone()),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct Field {
     pub hash: u32,
     pub ftype: i32,
     pub value: Value,
 }
 
+#[derive(Clone)]
 pub struct Class {
     pub hash: u32,
     pub fields: Vec<Field>,
     pub truncated: Option<String>,
+    /// Byte offset where this class's `num_fields` header begins.
+    pub start: usize,
+    /// Byte offset right after this class's last field (i.e. the total
+    /// byte length of this self-describing class blob is `end - start`).
+    pub end: usize,
 }
 
 fn read_scalar_text(r: &mut Reader, ftype: i32, size: u32) -> Result<String, String> {
@@ -197,21 +317,26 @@ fn read_array(r: &mut Reader) -> Result<Value, String> {
     r.align(4);
     let member_type = r.i32()?;
     let member_size = r.u32()?;
+    let len_offset = r.pos;
     let len = r.u32()?;
     let array_type = r.i32()?;
     if len > 1_000_000 {
         return Err(format!("array len too big: {len}"));
     }
+    let mut marker_indices = None;
     if array_type == 1 {
         let marker = r.u32()?;
         if marker == 0xffeeffee {
+            let mut indices = Vec::with_capacity(len as usize);
             for _ in 0..len {
-                let _ = r.u32()?;
+                indices.push(r.u32()?);
             }
+            marker_indices = Some(indices);
         } else {
             r.pos -= 4;
         }
     }
+    let items_start = r.pos;
     let mut items = Vec::new();
     for _ in 0..len {
         let v = match array_type {
@@ -249,8 +374,18 @@ fn read_array(r: &mut Reader) -> Result<Value, String> {
             break;
         }
     }
+    let items_end = r.pos;
     r.align(4);
-    Ok(Value::Array { member_type, items })
+    Ok(Value::Array {
+        member_type,
+        member_size,
+        array_type,
+        marker_indices,
+        items,
+        len_offset,
+        items_start,
+        items_end,
+    })
 }
 
 fn peek_u32(d: &[u8], p: usize) -> Option<u32> {
@@ -295,6 +430,7 @@ fn is_truncated(v: &Value) -> bool {
 }
 
 fn read_class(r: &mut Reader) -> Result<Class, String> {
+    let start = r.pos;
     let num_fields = r.u32()?;
     let hash = r.u32()?;
     if num_fields > 100_000 {
@@ -358,7 +494,127 @@ fn read_class(r: &mut Reader) -> Result<Class, String> {
         hash,
         fields,
         truncated,
+        start,
+        end: r.pos,
     })
+}
+
+/// Serialize a parsed `Class` back to bytes, starting at absolute file
+/// offset `start_pos`. Mirrors [`read_class`]'s alignment logic exactly
+/// (computed fresh for `start_pos`, not copied from wherever the class was
+/// originally read from), so the result is byte-identical to the original
+/// if `start_pos == class.start`, and correctly aligned/parseable if
+/// written at any other position.
+pub fn write_class(class: &Class, start_pos: usize) -> Vec<u8> {
+    let mut w = Writer::new(start_pos);
+    w.u32(class.fields.len() as u32);
+    w.u32(class.hash);
+    for f in &class.fields {
+        w.u32(f.hash);
+        w.i32(f.ftype);
+        write_value(&mut w, f.ftype, &f.value);
+        w.align(4);
+    }
+    w.buf
+}
+
+fn write_scalar(w: &mut Writer, ftype: i32, width: u8, text: &str) {
+    w.align(4);
+    w.u32(width as u32);
+    w.align(width as usize);
+    // `encode_scalar` never fails for a value that was itself produced by
+    // `read_scalar_text` (same ftype/width), which is the only source of
+    // `text` here.
+    let bytes = encode_scalar(ftype, width, text).unwrap_or_else(|_| vec![0u8; width as usize]);
+    w.bytes(&bytes);
+}
+
+fn write_string(w: &mut Writer, s: &str) {
+    w.align(4);
+    // Matches read_value's 0xf case: `size` is the exact number of UTF-16
+    // code units that follow, with no null terminator (confirmed via
+    // round-trip testing against real save data).
+    let units: Vec<u16> = s.encode_utf16().collect();
+    w.u32(units.len() as u32);
+    for u in units {
+        w.u16(u);
+    }
+}
+
+fn write_struct_bytes(w: &mut Writer, bytes: &[u8]) {
+    w.align(4);
+    w.u32(bytes.len() as u32);
+    if bytes.len() != 1 {
+        w.align(bytes.len());
+    }
+    w.bytes(bytes);
+}
+
+fn write_array(w: &mut Writer, value: &Value) {
+    let Value::Array {
+        member_type,
+        member_size,
+        array_type,
+        marker_indices,
+        items,
+        ..
+    } = value
+    else {
+        return;
+    };
+    w.align(4);
+    w.i32(*member_type);
+    w.u32(*member_size);
+    w.u32(items.len() as u32);
+    w.i32(*array_type);
+    if let Some(indices) = marker_indices {
+        w.u32(0xffeeffee);
+        for idx in indices {
+            w.u32(*idx);
+        }
+    }
+    for item in items {
+        match array_type {
+            0 => match item {
+                Value::Str { s, .. } => write_string(w, s),
+                Value::StructBytes { bytes, .. } => {
+                    if *member_size != 1 {
+                        w.align(*member_size as usize);
+                    }
+                    w.bytes(bytes);
+                }
+                Value::Scalar { ftype, width, text, .. } => {
+                    if *width != 1 {
+                        w.align(*width as usize);
+                    }
+                    let bytes = encode_scalar(*ftype, *width, text).unwrap_or_else(|_| vec![0u8; *width as usize]);
+                    w.bytes(&bytes);
+                }
+                _ => {}
+            },
+            _ => {
+                if let Value::Class(c) = item {
+                    let bytes = write_class(c, w.pos);
+                    w.bytes(&bytes);
+                }
+            }
+        }
+    }
+    w.align(4);
+}
+
+fn write_value(w: &mut Writer, ftype: i32, value: &Value) {
+    match (ftype, value) {
+        (-1, v @ Value::Array { .. }) => write_array(w, v),
+        (0x11, Value::Class(c)) => {
+            let bytes = write_class(c, w.pos);
+            w.bytes(&bytes);
+        }
+        (0xf, Value::Str { s, .. }) => write_string(w, s),
+        (0x10, Value::StructBytes { bytes, .. }) => write_struct_bytes(w, bytes),
+        (_, Value::Scalar { width, text, .. }) => write_scalar(w, ftype, *width, text),
+        _ => {}
+    }
 }
 
 fn struct_floats(bytes: &[u8]) -> Option<String> {
@@ -470,7 +726,7 @@ fn fmt_value(out: &mut Vec<String>, indent: usize, prefix: &str, ftype: i32, v: 
                 ));
             }
         }
-        Value::Array { member_type, items } => {
+        Value::Array { member_type, items, .. } => {
             let elem = hint.unwrap_or("");
             out.push(format!(
                 "{pad}{prefix} Array<{}>[{}]",
@@ -839,4 +1095,103 @@ pub fn parse(d: &[u8]) -> Vec<Root> {
         });
     }
     roots
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Decrypt a real save from the repo root into an in-memory payload,
+    /// for round-trip testing against real data.
+    fn real_decrypted_payload() -> Vec<u8> {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../data015Slot_REF_new.bin");
+        std::fs::read(path).expect("test fixture data015Slot_REF_new.bin not found")
+    }
+
+    #[test]
+    fn write_class_roundtrips_an_unmodified_item_at_its_original_offset() {
+        let payload = real_decrypted_payload();
+        let roots = parse(&payload);
+
+        // Find any inventory item (app.Inventory.PanelItemSaveData, hash
+        // 0xb00026aa) anywhere in the tree, and confirm re-serializing it
+        // unmodified at its own original offset reproduces the exact same
+        // bytes.
+        fn find_item<'a>(v: &'a Value) -> Option<&'a Class> {
+            match v {
+                Value::Class(c) if c.hash == 0xb00026aa => Some(c),
+                Value::Class(c) => c.fields.iter().find_map(|f| find_item(&f.value)),
+                Value::Array { items, .. } => items.iter().find_map(find_item),
+                _ => None,
+            }
+        }
+
+        let mut found = None;
+        for root in &roots {
+            if let Ok(class) = &root.class {
+                if let Some(item) = find_item(&Value::Class(class.clone())) {
+                    found = Some(item.clone());
+                    break;
+                }
+            }
+        }
+        let item = found.expect("no PanelItemSaveData item found in test fixture");
+        assert!(item.truncated.is_none(), "test fixture item is truncated");
+
+        let original_bytes = &payload[item.start..item.end];
+        let rewritten = write_class(&item, item.start);
+        assert_eq!(
+            rewritten, original_bytes,
+            "write_class did not reproduce the original bytes for an unmodified item"
+        );
+    }
+
+    #[test]
+    fn write_class_is_correctly_aligned_at_a_shifted_offset() {
+        // Re-serializing the same class at a deliberately misaligned
+        // offset (start_pos + 1) must still produce bytes that re-parse
+        // back into an equivalent, non-truncated class - proving alignment
+        // is computed relative to the new position, not copied from the
+        // original bytes.
+        let payload = real_decrypted_payload();
+        let roots = parse(&payload);
+
+        fn find_item<'a>(v: &'a Value) -> Option<&'a Class> {
+            match v {
+                Value::Class(c) if c.hash == 0xb00026aa => Some(c),
+                Value::Class(c) => c.fields.iter().find_map(|f| find_item(&f.value)),
+                Value::Array { items, .. } => items.iter().find_map(find_item),
+                _ => None,
+            }
+        }
+        let mut found = None;
+        for root in &roots {
+            if let Ok(class) = &root.class {
+                if let Some(item) = find_item(&Value::Class(class.clone())) {
+                    found = Some(item.clone());
+                    break;
+                }
+            }
+        }
+        let item = found.expect("no PanelItemSaveData item found in test fixture");
+
+        let shifted_pos = item.start + 1;
+        let bytes = write_class(&item, shifted_pos);
+
+        // Re-parse those bytes as if they lived at `shifted_pos` in a
+        // buffer (pad with a leading dummy byte so absolute offsets line
+        // up for Reader).
+        let mut buf = vec![0u8; shifted_pos];
+        buf.extend_from_slice(&bytes);
+        let mut r = Reader::new(&buf);
+        r.pos = shifted_pos;
+        let reparsed = read_class(&mut r).expect("reparse failed");
+        assert!(
+            reparsed.truncated.is_none(),
+            "reparsing the shifted-offset item was truncated: {:?}",
+            reparsed.truncated
+        );
+        assert_eq!(reparsed.hash, item.hash);
+        assert_eq!(reparsed.fields.len(), item.fields.len());
+    }
 }

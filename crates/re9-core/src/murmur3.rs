@@ -42,6 +42,16 @@ pub fn name_hash(name: &str) -> u32 {
     hash32(name.as_bytes(), 0xffffffff)
 }
 
+/// Hash for a game data string value (e.g. an item id like `"it40_00_000"`)
+/// as stored in `_ItemIDHash` fields: unlike field/class names (hashed as
+/// UTF-8), these are hashed as UTF-16LE - confirmed by hashing the equipped
+/// weapon's plain id string (`_Equips[]._ItemIDName`) and matching the
+/// `_ItemIDHash` at the same `_ItemIndex` in `_PanelItems`.
+pub fn utf16le_hash(s: &str) -> u32 {
+    let bytes: Vec<u8> = s.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+    hash32(&bytes, 0xffffffff)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -55,5 +65,14 @@ mod tests {
         let a = name_hash("app.Inventory");
         let b = name_hash("app.Inventory");
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn utf16le_hash_matches_equipped_weapon() {
+        // "it10_02_000" is the equipped Requiem's plain item id
+        // (_Equips[]._ItemIDName); its _ItemIDHash at the same _ItemIndex
+        // in _PanelItems is 0xf29dd2b8 (4070429368), confirmed against a
+        // real save.
+        assert_eq!(utf16le_hash("it10_02_000"), 0xf29dd2b8);
     }
 }
