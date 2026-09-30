@@ -15,9 +15,21 @@ fn load() -> HashMap<&'static str, &'static str> {
     HashMap::from([
         ("it20_00_003", "Bouteille vide"),
         ("it40_00_000", "Munition de pistolet"),
+        ("it10_00_003", "B934 (Pistolet)"),
+        ("it10_00_001", "S&S M232 (Pistolet)"),
+        ("it10_20_003", "Couteau de fortune"),
+        ("it10_20_005", "Couteau de chasse"),
         ("it40_02_000", "Munition de Requiem"),
         ("it10_02_000", "Requiem"),
+        ("it00_00_100", "Fiole Plante V+V"),
         ("it99_07_001", "Porte bonheur casse-dalle"),
+        ("it20_00_002", "Cocktail Molotov"),
+        ("it00_01_000", "Remede Injectable"),
+        ("it40_05_000", "Munitions de fusils"),
+        ("it10_01_000", "Fusil a pompe MSBG 500"),
+        ("it9_20_001", "Hache"),
+        ("it10_00_006", "aligator snaper (pistolet)"),
+        ("it10_05_000", "Classic 70 (Sniper) "),
     ])
 }
 

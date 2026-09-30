@@ -106,7 +106,7 @@ re9 set-chamber-quantity <decrypted.bin> <container> <container_index> <item_ind
 ```
 
 ```sh
-re9 set-loaded-quantity data011Slot_new.bin Hand 1 4 0 5
+re9 set-loaded-quantity data011Slot_new.bin Hand 1 4 0 e
 # Hand#1 [4].loaded[0]  stock: 4 -> 5  @0x86be8
 ```
 
