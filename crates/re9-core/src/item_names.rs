@@ -30,6 +30,7 @@ fn load() -> HashMap<&'static str, &'static str> {
         ("it9_20_001", "Hache"),
         ("it10_00_006", "aligator snaper (pistolet)"),
         ("it10_05_000", "Classic 70 (Sniper) "),
+        ("it20_00_005", "Acide"),
     ])
 }
 
